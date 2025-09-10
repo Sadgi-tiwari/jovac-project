@@ -1,0 +1,47 @@
+# cloudbuild.yaml
+
+# Substitutions let you deploy to different environments (stg, prd).
+substitutions:
+  _ENV: "stg"              # change to "prd" when needed
+  _REGION: "us-central1"
+  _REPO_REGION: "us"
+  _REPO: "app"
+  _SERVICE: "my-app"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitution_option: ALLOW_LOOSE
+
+steps:
+  # 1) Build the container image
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - "-t"
+      - "${_REPO_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${SHORT_SHA}"
+      - "-f"
+      - Dockerfile
+      - "."
+
+  # 2) Push the image to Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - "${_REPO_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${SHORT_SHA}"
+
+  # 3) Deploy to Cloud Run with environment-specific runtime SA
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        RUNTIME_SA="run-${_ENV}-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+        gcloud run deploy "${_SERVICE}-${_ENV}" \
+          --image "${_REPO_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}" \
+          --region "${_REGION}" \
+          --platform managed \
+          --service-account "${RUNTIME_SA}" \
+          --allow-unauthenticated
+
+images:
+  - "${_REPO_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${SHORT_SHA}"
